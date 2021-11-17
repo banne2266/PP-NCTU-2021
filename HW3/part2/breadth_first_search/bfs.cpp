@@ -6,6 +6,8 @@
 #include <cstddef>
 #include <omp.h>
 #include <algorithm>
+#include <iostream>
+#include <unordered_set>
 
 #include "../common/CycleTimer.h"
 #include "../common/graph.h"
@@ -40,7 +42,7 @@ void top_down_step(
     vertex_set *new_frontier,
     int *distances)
 {
-    #pragma omp parallel for
+    #pragma omp parallel for schedule(dynamic, 1024)
     for (int i = 0; i < frontier->count; i++)
     {
 
@@ -54,9 +56,11 @@ void top_down_step(
         // attempt to add all neighbors to the new frontier
         for (int neighbor = start_edge; neighbor < end_edge; neighbor++)
         {
-            int outgoing = g->outgoing_edges[neighbor];
+            int outgoing;
+            outgoing = g->outgoing_edges[neighbor];
 
-            if(__sync_bool_compare_and_swap(&distances[outgoing], NOT_VISITED_MARKER, distances[node] + 1)){
+            if(distances[outgoing] == NOT_VISITED_MARKER){
+                distances[outgoing] = distances[node] + 1;
                 int index = __sync_fetch_and_add(&(new_frontier->count), 1);
                 new_frontier->vertices[index] = outgoing;
                 //__sync_bool_compare_and_swap(&(new_frontier->vertices[index]), new_frontier->vertices[index], outgoing);
@@ -126,9 +130,9 @@ void bottom_up_step(
     int *distances)
 {
     int numNodes = num_nodes(g);
-    std::sort(frontier->vertices, (frontier->vertices)+(frontier->count));
+    std::unordered_set<int> hash(frontier->vertices, (frontier->vertices)+(frontier->count));
 
-    #pragma omp parallel for
+    #pragma omp parallel for schedule(dynamic, 1024)
     for (int v = 0; v < numNodes; v++){
         if(distances[v] == NOT_VISITED_MARKER){
             int node = v;
@@ -137,12 +141,13 @@ void bottom_up_step(
                             ? g->num_edges
                             : g->incoming_starts[node + 1];
             for (int neighbor = start_edge; neighbor < end_edge; neighbor++){
-                int incoming = g->incoming_edges[neighbor];
+                int incoming;
+                incoming = g->incoming_edges[neighbor];
                 if(distances[incoming] == NOT_VISITED_MARKER)continue;
-                if(std::binary_search(frontier->vertices, (frontier->vertices)+(frontier->count), incoming)){
+                if(hash.find(incoming) != hash.end()){
                     distances[node] = distances[incoming] + 1;
-                    int index = __sync_fetch_and_add(&(new_frontier->count), 1);
-                    new_frontier->vertices[index] = node;
+                    //int index = __sync_fetch_and_add(&(new_frontier->count), 1);
+                    new_frontier->vertices[__sync_fetch_and_add(&(new_frontier->count), 1)] = node;
                     //__sync_bool_compare_and_swap(&(new_frontier->vertices[index]), new_frontier->vertices[index], node);
                     break;
                 }
